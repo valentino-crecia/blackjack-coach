@@ -36,7 +36,7 @@ node tests/qa-strategy-reference.mjs  # QA: estrategia contra la transcripción 
 | `strategy.js` | Estrategia básica sin DOM: tablas por reglas, `bestAction(hand, dealerUp, rules, available)`, explicaciones. |
 | `config.js` | **Mesas, reglas, umbrales de desbloqueo, economía, rachas y tiempo de Contrarreloj.** |
 | `storage.js` | `localStorage` siempre en try/catch (clave `bjcoach.v1`); si falla, sigue en memoria y avisa. |
-| `sw.js` | Service worker: precache (saltando el caché HTTP), cache-first, cache `bjcoach-v2`. |
+| `sw.js` | Service worker: precache (saltando el caché HTTP), cache-first, cache `bjcoach-v3`. |
 | `manifest.webmanifest`, `icons/` | Datos de instalación e íconos (180, 192, 512). |
 | `tests/` | Tests y simulación. |
 | `docs/capturas/` | Capturas de cada pantalla a 375×812. |
@@ -52,7 +52,7 @@ node tests/qa-strategy-reference.mjs  # QA: estrategia contra la transcripción 
 
 Si cambias reglas de una mesa, actualiza las tablas esperadas en `tests/strategy.test.mjs` y la referencia en `tests/simulate.mjs`.
 
-**Al publicar cambios**, sube la versión del cache en `sw.js` (`bjcoach-v2` → `bjcoach-v3`) para que los teléfonos que ya la tienen instalada bajen la nueva.
+**Al publicar cambios**, sube la versión del cache en `sw.js` (`bjcoach-v3` → `bjcoach-v4`) para que los teléfonos que ya la tienen instalada bajen la nueva.
 
 ## Publicación
 
@@ -69,7 +69,7 @@ Prueba rápida: ábrela una vez con red, activa el modo avión y ábrela desde e
 
 ### Publicar una versión nueva
 
-1. Sube la versión del cache en `sw.js` (`bjcoach-v2` → `bjcoach-v3`, y así). Sin esto, los teléfonos que ya la tienen siguen con la versión vieja.
+1. Sube la versión del cache en `sw.js` (`bjcoach-v3` → `bjcoach-v4`, y así). Sin esto, los teléfonos que ya la tienen siguen con la versión vieja.
 2. `git commit` y `git push` a `main`. GitHub Pages publica solo en uno o dos minutos (estado en la pestaña Actions del repo).
 3. En el teléfono, abre la app con red: la versión nueva se descarga y queda activa la siguiente vez que la abras.
 

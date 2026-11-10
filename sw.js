@@ -1,6 +1,6 @@
 // Service worker: precache de todos los archivos y cache-first.
 // Cambia la versión al publicar cambios para que los teléfonos bajen la nueva.
-const CACHE = 'bjcoach-v2';
+const CACHE = 'bjcoach-v3';
 const FILES = [
   './',
   './index.html',

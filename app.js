@@ -466,14 +466,47 @@ function totalBadge(cards, extra = '', live = false) {
   return `<span class="total ${extra} ${total > 21 ? 'bust' : ''}">${txt}</span>`;
 }
 
-// Ancho de carta (px) y espacio máximo para las cartas de cada mano según cuántas manos hay.
-// Calculado para que 4 manos quepan completas a 360 px.
-const HAND_LAYOUT = {
-  1: { w: 62, budget: 220 },
-  2: { w: 52, budget: 130 },
-  3: { w: 40, budget: 88 },
-  4: { w: 34, budget: 64 },
+// ---------- Tamaño de las cartas ----------
+// Cada carta deja ver al menos su índice (rango y palo) bajo la siguiente. Si no caben,
+// las cartas se achican en vez de solaparse más. El espacio sale del ancho real de la pantalla.
+const INDEX_VISIBLE = 0.5; // fracción de la carta que queda a la vista bajo la siguiente
+const MIN_CARD_W = 24;
+const HAND_SIZES = {
+  // ancho base de carta, separación entre manos y borde + relleno de cada mano
+  1: { w: 62, gap: 0, chrome: 16 },
+  2: { w: 52, gap: 10, chrome: 16 },
+  3: { w: 40, gap: 6, chrome: 10 },
+  4: { w: 34, gap: 4, chrome: 10 },
 };
+
+function feltInnerWidth() {
+  const app = document.getElementById('app');
+  const w = Math.min((app && app.clientWidth) || window.innerWidth, 520);
+  return w - 24 - 20; // relleno de la pantalla de juego y del paño
+}
+
+function rootCardWidth() {
+  const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--card-w'));
+  return Number.isFinite(v) ? v : 62;
+}
+
+// Devuelve el estilo (ancho, alto y paso entre cartas) para k cartas en un espacio dado.
+function cardsStyle(k, budget, baseW) {
+  let w = baseW;
+  let step = 0;
+  if (k > 1) {
+    w = Math.max(MIN_CARD_W, Math.min(baseW, budget / (1 + INDEX_VISIBLE * (k - 1))));
+    step = Math.max(w * INDEX_VISIBLE, Math.min(w * 0.58, (budget - w) / (k - 1)));
+  }
+  return `--card-w:${w.toFixed(1)}px;--card-h:${(w * 1.42).toFixed(1)}px;--step:${step.toFixed(1)}px`;
+}
+
+function handBudget(nh) {
+  const sz = HAND_SIZES[nh] || HAND_SIZES[4];
+  const inner = feltInnerWidth();
+  if (nh === 1) return { base: Math.min(sz.w, rootCardWidth()), budget: Math.min(inner * 0.8, 260) };
+  return { base: sz.w, budget: (inner - sz.gap * (nh - 1)) / nh - sz.chrome };
+}
 
 function viewPlay() {
   const g = ui.game;
@@ -505,10 +538,11 @@ function viewPlay() {
       })
       .join('');
     const shownDealer = hideHole ? [r.dealer[0]] : r.dealer;
-    dealerHtml = `<div class="cards">${dCards}</div>${hideHole ? `<span class="total dealer-total">${upText(r.dealer[0])}</span>` : totalBadge(shownDealer, 'dealer-total')}`;
+    const dStyle = cardsStyle(r.dealer.length, feltInnerWidth() - 64, rootCardWidth());
+    dealerHtml = `<div class="cards" style="${dStyle}">${dCards}</div>${hideHole ? `<span class="total dealer-total">${upText(r.dealer[0])}</span>` : totalBadge(shownDealer, 'dealer-total')}`;
 
     const nh = r.hands.length;
-    const layout = HAND_LAYOUT[nh] || HAND_LAYOUT[4];
+    const hb = handBudget(nh);
     playerHtml = `<div class="hands n${nh}">${r.hands
       .map((h, hi) => {
         const cards = h.cards
@@ -519,11 +553,8 @@ function viewPlay() {
           .join('');
         const active = r.phase === 'player' && hi === r.active && r.hands.length > 1;
         const out = r.phase === 'done' && h.outcome ? OUTCOME[h.outcome] : null;
-        // Solapa más las cartas cuando hay varias manos, para que todas quepan completas.
-        const k = h.cards.length;
-        const step = k > 1 ? Math.min(layout.w * 0.58, (layout.budget - layout.w) / (k - 1)) : 0;
         return `<div class="hand ${active ? 'active' : ''} ${h.done && r.phase === 'player' ? 'dim' : ''}">
-          <div class="cards" style="--step:${step.toFixed(1)}px">${cards}</div>
+          <div class="cards" style="${cardsStyle(h.cards.length, hb.budget, hb.base)}">${cards}</div>
           <div class="hand-meta">${totalBadge(h.cards, '', r.phase === 'player' && !h.done)}<span class="bet-chip" title="${h.doubled ? 'Apuesta doblada' : 'Apuesta'}">${fmt(h.bet)}</span></div>
           <span class="outcome-slot">${out ? `<span class="outcome ${out[1]}" style="animation-delay:${anim.last}ms">${out[0]}</span>` : ''}</span>
         </div>`;
@@ -637,7 +668,7 @@ function controlsHtml() {
       <div class="bet-amount"><span class="chip-big" aria-hidden="true"></span><b>${fmt(bet)}</b><small>Apuesta ${t.minBet}–${max}</small></div>
       <button class="round-btn" data-on="bet" data-arg="10" ${bet >= max ? 'disabled' : ''} aria-label="Subir apuesta">+</button>
     </div>
-    <button class="btn gold deal" data-on="deal">${r ? 'Otra mano' : 'Repartir'}</button>
+    <button class="btn gold deal-btn" data-on="deal">${r ? 'Otra mano' : 'Repartir'}</button>
   </div>`;
 }
 
@@ -1039,6 +1070,15 @@ document.addEventListener('keydown', (e) => {
   if (!a || ui.modal || performance.now() < ui.lockUntil) return;
   if (ui.screen === 'play' && ui.game?.round?.phase === 'player') decide(a);
   else if (ui.screen === 'timed' && ui.timed?.running) timedAnswer(a);
+});
+
+// Si cambia el ancho (rotar el teléfono), recalcula el tamaño de las cartas.
+let resizeT = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeT);
+  resizeT = setTimeout(() => {
+    if (ui.screen === 'play' && !ui.modal) render();
+  }, 150);
 });
 
 // ---------- Arranque ----------

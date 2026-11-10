@@ -18,11 +18,14 @@
   </head>
   <body>
     <div id="app">
-      <header id="topbar" class="topbar"></header>
-      <div id="storage-warning" class="storage-warning" role="status" hidden>Tu progreso no se está guardando en este navegador</div>
+      <!-- Encabezado fijo: barra, aviso de guardado y avisos pasajeros, apilados sin taparse. -->
+      <header class="header">
+        <div id="topbar" class="topbar"></div>
+        <div id="storage-warning" class="storage-warning" role="status" hidden>Tu progreso no se está guardando en este navegador</div>
+        <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      </header>
       <main id="view" class="view" tabindex="-1"></main>
     </div>
-    <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <div id="modal-root"></div>
     <noscript><p class="noscript">Activa JavaScript para jugar.</p></noscript>
     <script type="module" src="app.js"></script>
