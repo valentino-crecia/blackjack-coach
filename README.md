@@ -54,6 +54,27 @@ Si cambias reglas de una mesa, actualiza las tablas esperadas en `tests/strategy
 
 **Al publicar cambios**, sube la versión del cache en `sw.js` (`bjcoach-v2` → `bjcoach-v3`) para que los teléfonos que ya la tienen instalada bajen la nueva.
 
+## Publicación
+
+La app está publicada en GitHub Pages desde la rama `main`, carpeta raíz:
+
+**https://valentino-crecia.github.io/blackjack-coach/**
+
+### Instalarla en el teléfono
+
+- **iPhone:** abre la URL en Safari → botón Compartir → "Agregar a inicio".
+- **Android:** abre la URL en Chrome → menú ⋮ → "Instalar app" (o "Agregar a la pantalla principal").
+
+Prueba rápida: ábrela una vez con red, activa el modo avión y ábrela desde el ícono. Debe abrir y dejar jugar.
+
+### Publicar una versión nueva
+
+1. Sube la versión del cache en `sw.js` (`bjcoach-v2` → `bjcoach-v3`, y así). Sin esto, los teléfonos que ya la tienen siguen con la versión vieja.
+2. `git commit` y `git push` a `main`. GitHub Pages publica solo en uno o dos minutos (estado en la pestaña Actions del repo).
+3. En el teléfono, abre la app con red: la versión nueva se descarga y queda activa la siguiente vez que la abras.
+
+Para revertir: `git revert <commit>`, sube otra vez la versión del cache y haz push.
+
 ## Reglas de la app que conviene saber
 
 - La apuesta se cobra al repartir. Si sales a mitad de mano (botón ← o Estadísticas) pierdes lo apostado, incluido lo doblado, dividido o el seguro, y las decisiones ya tomadas cuentan para Práctica. Si cierras o recargas la página a mitad de mano, al volver esa mano se cierra como abandonada.
