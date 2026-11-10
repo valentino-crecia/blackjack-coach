@@ -356,6 +356,42 @@ export class Round {
   }
 }
 
+// ---------- Mano abandonada ----------
+
+// La apuesta se cobra al repartir. Si sales a mitad de mano, pierdes todo lo apostado
+// (apuesta original, lo doblado, lo dividido y el seguro).
+export function isInProgress(round) {
+  return !!round && (round.phase === 'insurance' || round.phase === 'player');
+}
+
+export function abandonRound(round) {
+  if (!isInProgress(round)) return round ? round.net : 0;
+  round.phase = 'abandoned';
+  round.net = -round.committed();
+  return round.net;
+}
+
+// Fichas que se muestran durante la mano: saldo inicial menos lo que está en la mesa.
+export function chipsDuringHand(chipsAtStart, round) {
+  return chipsAtStart - (round ? round.committed() : 0);
+}
+
+// Agrega una mano de Práctica ({ c, t }) y conserva solo las últimas N.
+export function pushPracticeHand(hands, rec, window = ACCURACY_WINDOW) {
+  if (!rec || !rec.t) return hands.slice(-window);
+  return [...hands, { c: rec.c, t: rec.t }].slice(-window);
+}
+
+// Cierra una mano pendiente guardada (por ejemplo, si recargaste la página a mitad de mano).
+// Las fichas ya se descontaron al repartir; aquí solo se registran las decisiones tomadas.
+export function closePendingHand(state) {
+  const p = state.pending;
+  if (!p) return null;
+  if (p.practice) state.practiceHands = pushPracticeHand(state.practiceHands || [], p);
+  state.pending = null;
+  return { lost: p.staked, decisions: p.t };
+}
+
 // Juega una ronda completa con estrategia perfecta (nunca toma seguro).
 export function playPerfect(round) {
   if (round.phase === 'new') round.deal();

@@ -14,6 +14,11 @@ import {
   unlockStatus,
   fmt,
   buildDecks,
+  abandonRound,
+  isInProgress,
+  chipsDuringHand,
+  closePendingHand,
+  pushPracticeHand,
 } from '../engine.js';
 import { TABLES, rulesOf } from '../config.js';
 import { createStore } from '../storage.js';
@@ -247,6 +252,41 @@ check('Falta 1 ficha', st.text, 'Te faltan 1 ficha');
 check('Precisión: últimas 50 manos', accuracyOf([...hands(10, 0, 1), ...hands(50, 1, 1)]).pct, 100);
 check('Formato 1.000', fmt(1000), '1.000');
 check('Formato 1.234,56', fmt(1234.56, 2), '1.234,56');
+
+// Abandonar la mano: la apuesta se cobra al repartir y salir no es gratis
+r = round(['5', '6', '6', '10', '10', '9']);
+check('Al repartir quedan 10 fichas en la mesa', chipsDuringHand(1000, r), 990);
+r.act('double');
+check('Doblar: 20 en la mesa', r.committed(), 20);
+r = round(['8', '6', '8', '10', '3', '2', '9']);
+r.act('split');
+r.act('double'); // mano 1: 8+3 doblada
+check('Dividir y doblar: 30 en la mesa', r.committed(), 30);
+check('Fichas visibles durante la mano', chipsDuringHand(1000, r), 970);
+check('La mano sigue en juego', isInProgress(r), true);
+check('Abandonar pierde todo lo apostado (−30)', abandonRound(r), -30);
+check('Mano abandonada', r.phase, 'abandoned');
+throws('No se puede jugar una mano abandonada', () => r.act('stand'));
+r = round(['10', 'A', '6', '7']);
+r.insurance(true);
+check('Abandonar con seguro tomado pierde apuesta + seguro (−15)', abandonRound(r), -15);
+r = round(['A', '9', 'K', '7']);
+check('Una mano terminada no se abandona', abandonRound(r), 15);
+check('Una mano terminada no está en juego', isInProgress(r), false);
+
+const st1 = { chips: 970, practiceHands: hands(50, 1, 1), pending: { practice: true, staked: 30, c: 1, t: 2 } };
+const closed = closePendingHand(st1);
+check('Mano pendiente al reabrir: se cierra', st1.pending, null);
+check('Mano pendiente: informa lo perdido', closed.lost, 30);
+check('Mano pendiente: las fichas ya estaban descontadas', st1.chips, 970);
+check('Mano pendiente: registra sus decisiones en Práctica', JSON.stringify(st1.practiceHands.at(-1)), '{"c":1,"t":2}');
+check('Mano pendiente: conserva solo 50 manos', st1.practiceHands.length, 50);
+check('Mano pendiente: cuenta en la precisión (50 de 51)', accuracyOf(st1.practiceHands).pct, (50 / 51) * 100);
+const st2 = { chips: 990, practiceHands: [], pending: { practice: false, staked: 10, c: 0, t: 1 } };
+closePendingHand(st2);
+check('Mano pendiente de Guía: no cuenta para Práctica', st2.practiceHands.length, 0);
+check('Sin mano pendiente: nada que cerrar', closePendingHand({ pending: null }), null);
+check('Mano sin decisiones no suma a Práctica', pushPracticeHand([], { c: 0, t: 0 }).length, 0);
 
 // Persistencia: si localStorage lanza error, la app sigue en memoria y avisa
 const broken = {

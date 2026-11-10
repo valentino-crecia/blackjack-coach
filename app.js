@@ -17,6 +17,10 @@ import {
   cryptoRandInt,
   RANKS,
   SUITS,
+  abandonRound,
+  isInProgress,
+  closePendingHand,
+  pushPracticeHand,
 } from './engine.js';
 import { bestAction, ACTION_LABEL, chartRows, handTotal, isPair, defaultAvailable } from './strategy.js';
 import { createStore } from './storage.js';
@@ -44,6 +48,7 @@ function defaultState() {
     byCat: Object.fromEntries(CATS.map((c) => [c, { c: 0, t: 0 }])),
     misses: {},
     timedBest: {},
+    pending: null, // mano en juego (apuesta ya cobrada) para cerrarla si se recarga la página
   };
 }
 
@@ -78,6 +83,7 @@ const ui = {
   timed: null,
   chartTable: S.tableId,
   modal: null,
+  lockUntil: 0, // ignora toques repetidos mientras se reparten las cartas
 };
 const shoes = new Map();
 function shoeFor(table) {
@@ -133,6 +139,8 @@ function cardHtml(card, opts = {}) {
   </div>`;
 }
 
+const DEAL_STEP = 180; // ms entre carta y carta
+
 // Anima solo las cartas nuevas de la ronda, una detrás de otra.
 function makeAnimator(seen) {
   let n = 0;
@@ -144,12 +152,12 @@ function makeAnimator(seen) {
       if (!seen.has(key)) {
         anim = !opts.hidden && seen.has(card.id + 'h') ? 'reveal' : 'deal';
         seen.add(key);
-        delay = n++ * 260;
+        delay = n++ * DEAL_STEP;
       }
       return cardHtml(card, { ...opts, anim, delay });
     },
     get last() {
-      return Math.max(0, n - 1) * 260 + 380;
+      return n ? (n - 1) * DEAL_STEP + 360 : 0;
     },
   };
 }
@@ -238,7 +246,7 @@ function viewHome() {
 }
 
 function fmtScore(n) {
-  return fmt(n, Number.isInteger(n) ? 0 : 1);
+  return fmt(Math.round(n));
 }
 
 // ---------- Juego (Guía y Práctica) ----------
@@ -263,6 +271,8 @@ function deal() {
     shuffled = true;
   }
   g.shadowStart = g.mode === 'practice' ? shoe.clone() : null;
+  // La apuesta se cobra al repartir, como en un casino.
+  g.chipsStart = S.chips;
   g.round = new Round({ shoe, rules: rulesOf(t), bet, bankroll: S.chips }).deal();
   g.decisions = [];
   g.feedback = null;
@@ -320,11 +330,48 @@ function bestLabel(action) {
   return action === 'no' ? 'No tomar el seguro' : ACTION_LABEL[action];
 }
 
+// Mientras la mano está en juego, lo apostado ya salió de tus fichas y queda guardado
+// como mano pendiente: recargar la página no es una salida gratis.
+function syncStake() {
+  const g = ui.game;
+  const r = g && g.round;
+  if (!isInProgress(r)) return;
+  S.chips = g.chipsStart - r.committed();
+  S.pending = {
+    tableId: g.table.id,
+    practice: g.mode === 'practice',
+    staked: r.committed(),
+    c: g.decisions.filter((d) => d.correct).length,
+    t: g.decisions.length,
+  };
+}
+
 function afterAction() {
   const g = ui.game;
   if (g.round && g.round.phase === 'done' && !g.end) settle();
+  else syncStake();
   save();
   render();
+  // Evita que un doble toque juegue una decisión en la mano siguiente.
+  ui.lockUntil = performance.now() + Math.max(400, ui.animMs || 0);
+}
+
+function handInProgress() {
+  return ui.screen === 'play' && ui.game && isInProgress(ui.game.round);
+}
+
+// Sales a mitad de mano: pierdes lo apostado y las decisiones tomadas cuentan.
+function abandonHand() {
+  const g = ui.game;
+  if (!g || !isInProgress(g.round)) return;
+  syncStake();
+  abandonRound(g.round);
+  const p = S.pending;
+  closePendingHand(S);
+  g.round = null;
+  g.end = null;
+  save();
+  if (p && p.staked) toast(`Abandonaste la mano: perdiste ${fmt(p.staked)} fichas`);
 }
 
 const PAST = { hit: 'Pediste', stand: 'Te plantaste', double: 'Doblaste', split: 'Dividiste', surrender: 'Te rendiste', insurance: 'Tomaste el seguro' };
@@ -355,13 +402,11 @@ function settle() {
   const r = g.round;
   const end = { net: r.net, bonus: 0, cost: null };
   if (g.mode === 'practice') {
-    end.bonus = streakBonus(r.net, streakMultiplier(S.streak));
     const t = g.decisions.length;
-    if (t > 0) {
-      const c = g.decisions.filter((d) => d.correct).length;
-      S.practiceHands.push({ c, t });
-      if (S.practiceHands.length > ACCURACY_WINDOW) S.practiceHands = S.practiceHands.slice(-ACCURACY_WINDOW);
-    }
+    // El bono premia jugar bien: un blackjack natural sin decisiones no lo da.
+    if (t > 0) end.bonus = streakBonus(r.net, streakMultiplier(S.streak));
+    const c = g.decisions.filter((d) => d.correct).length;
+    S.practiceHands = pushPracticeHand(S.practiceHands, { c, t });
     const errors = g.decisions.filter((d) => !d.correct);
     if (errors.length) {
       const sh = shadowRound({ shoe: g.shadowStart, rules: rulesOf(g.table), bet: r.bet, bankroll: r.bankroll });
@@ -370,7 +415,8 @@ function settle() {
       end.cost = { value: cost, text: costText(g.table, r, sh, errors, cost) };
     }
   }
-  S.chips += r.net + end.bonus;
+  S.chips = g.chipsStart + r.net + end.bonus;
+  S.pending = null;
   g.end = end;
   if (g.mode === 'practice') checkUnlocks();
   if (r.net > 0) vibrate(20);
@@ -393,7 +439,7 @@ const OUTCOME = {
   push: ['Empate', 'push'],
   bust: ['Te pasaste', 'lose'],
   surrender: ['Rendida', 'push'],
-  'dealer-blackjack': ['Blackjack del crupier', 'lose'],
+  'dealer-blackjack': ['Pierde', 'lose'],
 };
 
 function feltArc(table) {
@@ -419,6 +465,15 @@ function totalBadge(cards, extra = '', live = false) {
   const txt = live && soft && total < 21 ? `${total - 10}/${total}` : String(total);
   return `<span class="total ${extra} ${total > 21 ? 'bust' : ''}">${txt}</span>`;
 }
+
+// Ancho de carta (px) y espacio máximo para las cartas de cada mano según cuántas manos hay.
+// Calculado para que 4 manos quepan completas a 360 px.
+const HAND_LAYOUT = {
+  1: { w: 62, budget: 220 },
+  2: { w: 52, budget: 130 },
+  3: { w: 40, budget: 88 },
+  4: { w: 34, budget: 64 },
+};
 
 function viewPlay() {
   const g = ui.game;
@@ -452,8 +507,9 @@ function viewPlay() {
     const shownDealer = hideHole ? [r.dealer[0]] : r.dealer;
     dealerHtml = `<div class="cards">${dCards}</div>${hideHole ? `<span class="total dealer-total">${upText(r.dealer[0])}</span>` : totalBadge(shownDealer, 'dealer-total')}`;
 
-    const many = r.hands.length > 2 ? 'many' : r.hands.length === 2 ? 'two' : '';
-    playerHtml = `<div class="hands ${many}">${r.hands
+    const nh = r.hands.length;
+    const layout = HAND_LAYOUT[nh] || HAND_LAYOUT[4];
+    playerHtml = `<div class="hands n${nh}">${r.hands
       .map((h, hi) => {
         const cards = h.cards
           .map((c, ci) => {
@@ -463,10 +519,13 @@ function viewPlay() {
           .join('');
         const active = r.phase === 'player' && hi === r.active && r.hands.length > 1;
         const out = r.phase === 'done' && h.outcome ? OUTCOME[h.outcome] : null;
+        // Solapa más las cartas cuando hay varias manos, para que todas quepan completas.
+        const k = h.cards.length;
+        const step = k > 1 ? Math.min(layout.w * 0.58, (layout.budget - layout.w) / (k - 1)) : 0;
         return `<div class="hand ${active ? 'active' : ''} ${h.done && r.phase === 'player' ? 'dim' : ''}">
-          <div class="cards">${cards}</div>
+          <div class="cards" style="--step:${step.toFixed(1)}px">${cards}</div>
           <div class="hand-meta">${totalBadge(h.cards, '', r.phase === 'player' && !h.done)}<span class="bet-chip" title="${h.doubled ? 'Apuesta doblada' : 'Apuesta'}">${fmt(h.bet)}</span></div>
-          ${out ? `<span class="outcome ${out[1]}" style="animation-delay:${anim.last}ms">${out[0]}</span>` : ''}
+          <span class="outcome-slot">${out ? `<span class="outcome ${out[1]}" style="animation-delay:${anim.last}ms">${out[0]}</span>` : ''}</span>
         </div>`;
       })
       .join('')}</div>`;
@@ -474,7 +533,9 @@ function viewPlay() {
     if (r.phase === 'done' && g.end) {
       const n = g.end.net;
       const cls = n > 0 ? 'win' : n < 0 ? 'lose' : 'push';
-      const title = r.playerBlackjack && !r.dealerBlackjack ? 'Blackjack' : n > 0 ? 'Ganaste' : n < 0 ? 'Perdiste' : 'Empate';
+      let title = n > 0 ? 'Ganaste' : n < 0 ? 'Perdiste' : 'Empate';
+      if (r.playerBlackjack && !r.dealerBlackjack) title = 'Blackjack';
+      else if (r.dealerBlackjack && !r.playerBlackjack) title = 'Blackjack del crupier';
       const ins = r.insuranceTaken ? `<small>Seguro ${r.insuranceNet > 0 ? '+' : '−'}${fmt(Math.abs(r.insuranceNet))}</small>` : '';
       centerHtml = `<div class="result ${cls}" style="animation-delay:${anim.last}ms">
         <span class="r-title">${title}</span><span class="r-net">${n > 0 ? '+' : n < 0 ? '−' : ''}${fmt(Math.abs(n))}</span>${ins}
@@ -483,6 +544,7 @@ function viewPlay() {
     }
   }
 
+  ui.animMs = anim.last;
   return `<section class="play">
     <div class="felt t-${t.id}">
       ${feltArc(t)}
@@ -536,10 +598,12 @@ const HOW_COST = `<p>Al empezar cada mano copiamos el zapato. Una mano sombra ju
 const ACT_ORDER_TOP = ['double', 'split', 'surrender'];
 const ACT_ORDER_BOTTOM = ['hit', 'stand'];
 
-function actionButtons(av, highlight, onName = 'act', disabledAll = false) {
+// En mesas sin rendición el botón Rendirse no aparece (quedan 4 botones).
+function actionButtons(av, highlight, table, onName = 'act', disabledAll = false) {
   const btn = (a) =>
     `<button class="act act-${a} ${highlight === a ? 'recommended' : ''}" data-on="${onName}" data-arg="${a}" ${!av[a] || disabledAll ? 'disabled' : ''}>${ACTION_LABEL[a]}</button>`;
-  return `<div class="actions"><div class="row3">${ACT_ORDER_TOP.map(btn).join('')}</div><div class="row2">${ACT_ORDER_BOTTOM.map(btn).join('')}</div></div>`;
+  const top = ACT_ORDER_TOP.filter((a) => a !== 'surrender' || table.surrender);
+  return `<div class="actions"><div class="row3 n${top.length}">${top.map(btn).join('')}</div><div class="row2">${ACT_ORDER_BOTTOM.map(btn).join('')}</div></div>`;
 }
 
 function controlsHtml() {
@@ -558,7 +622,7 @@ function controlsHtml() {
   }
   if (r && r.phase === 'player') {
     const hl = g.mode === 'guide' ? r.advice().action : null;
-    return actionButtons(r.available(), hl);
+    return actionButtons(r.available(), hl, g.table);
   }
   // Apuesta (antes de repartir o al terminar la mano)
   const t = g.table;
@@ -629,6 +693,7 @@ function timedEnd() {
   T.running = false;
   T.finished = true;
   const id = T.table.id;
+  T.score = Math.round(T.score);
   if (T.score > (S.timedBest[id] || 0)) {
     S.timedBest[id] = T.score;
     T.newRecord = T.score > 0;
@@ -724,7 +789,7 @@ function viewTimed() {
       <div class="player-area"><div class="hands"><div class="hand"><div class="cards">${T.cur.cards.map((c) => anim.card(c)).join('')}</div><div class="hand-meta">${totalBadge(T.cur.cards, '', true)}</div></div></div></div>
     </div>
     <div class="coach">${f && !f.correct ? `<div class="hint error"><b>Lo correcto era ${bestLabel(f.best)}</b><span>${f.reason}</span></div>` : ''}</div>
-    <div class="controls">${actionButtons(av, f ? f.best : null, 'timed-act', !!f)}</div>
+    <div class="controls">${actionButtons(av, f ? f.best : null, t, 'timed-act', !!f)}</div>
   </section>`;
 }
 
@@ -796,7 +861,7 @@ function viewStats() {
   const cost = S.errorCost;
   const costNote =
     cost < 0
-      ? `<p class="muted">Esta vez tus errores te hicieron ganar ${fmt(-cost)} fichas. Fue suerte: a la larga, jugar perfecto pierde menos.</p>`
+      ? `<p class="muted">En total tus errores te hicieron ganar ${fmt(-cost)} fichas. Fue suerte: a la larga, jugar perfecto pierde menos.</p>`
       : '';
   return `<section class="stats">
     <h1 class="page-title">Estadísticas</h1>
@@ -821,6 +886,15 @@ function viewStats() {
 }
 
 function modalHtml() {
+  if (ui.modal === 'leave') {
+    const staked = ui.game && ui.game.round ? ui.game.round.committed() : 0;
+    return `<div class="modal-bg" data-on="modal-close"></div>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
+    <h2 id="m-title">¿Salir de la mano?</h2>
+    <p>Si sales ahora pierdes la apuesta de esta mano (${fmt(staked)} fichas). Las decisiones que ya tomaste cuentan.</p>
+    <div class="modal-btns"><button class="btn ghost" data-on="modal-close">Seguir jugando</button><button class="btn danger" data-on="leave-do">Salir</button></div>
+  </div>`;
+  }
   if (ui.modal !== 'reset') return '';
   return `<div class="modal-bg" data-on="modal-close"></div>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
@@ -828,6 +902,17 @@ function modalHtml() {
     <p>Vuelves a 1.000 fichas, se borran tus estadísticas y las mesas desbloqueadas. No se puede deshacer.</p>
     <div class="modal-btns"><button class="btn ghost" data-on="modal-close">Cancelar</button><button class="btn danger" data-on="reset-do">Borrar</button></div>
   </div>`;
+}
+
+// Salir a mitad de mano pide confirmación: la apuesta ya está en la mesa.
+function leaveTo(screen) {
+  if (handInProgress()) {
+    ui.leaveTarget = screen;
+    ui.modal = 'leave';
+    render();
+    return;
+  }
+  go(screen);
 }
 
 // ---------- Render y eventos ----------
@@ -858,8 +943,14 @@ function go(screen) {
 }
 
 const handlers = {
-  home: () => go('home'),
-  stats: () => go('stats'),
+  home: () => leaveTo('home'),
+  stats: () => leaveTo('stats'),
+  'leave-do': () => {
+    const to = ui.leaveTarget || 'home';
+    ui.modal = null;
+    abandonHand();
+    go(to);
+  },
   mode: (m) => {
     S.mode = m;
     save();
@@ -885,14 +976,20 @@ const handlers = {
       go('play');
     }
   },
-  deal: () => deal(),
+  deal: () => {
+    if (performance.now() < ui.lockUntil) return;
+    deal();
+  },
   bet: (delta) => {
     const g = ui.game;
     S.bet = clampBet(S.bet + Number(delta), S.chips, g.table) || g.table.minBet;
     save();
     render();
   },
-  act: (a) => decide(a),
+  act: (a) => {
+    if (performance.now() < ui.lockUntil) return;
+    decide(a);
+  },
   reload: () => {
     const res = applyReload(S.chips, S.reloads);
     S.chips = res.chips;
@@ -939,16 +1036,19 @@ document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === 'Escape' && ui.modal) return handlers['modal-close']();
   const a = KEYS[e.key.toLowerCase()];
-  if (!a) return;
+  if (!a || ui.modal || performance.now() < ui.lockUntil) return;
   if (ui.screen === 'play' && ui.game?.round?.phase === 'player') decide(a);
   else if (ui.screen === 'timed' && ui.timed?.running) timedAnswer(a);
 });
 
 // ---------- Arranque ----------
 
+// Si cerraste o recargaste la página a mitad de mano, esa mano se cierra como abandonada.
+const closed = closePendingHand(S);
 checkUnlocks();
 save();
 render();
+if (closed && closed.lost) toast(`La mano que dejaste a medias se cerró: perdiste ${fmt(closed.lost)} fichas`, 4000);
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => {

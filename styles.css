@@ -52,6 +52,10 @@ button {
   font: inherit;
   color: inherit;
   cursor: pointer;
+  touch-action: manipulation;
+}
+html {
+  touch-action: manipulation;
 }
 button:focus-visible,
 summary:focus-visible {
@@ -194,6 +198,10 @@ summary:focus-visible {
   flex-direction: column;
   outline: none;
   padding-bottom: var(--safe-bottom);
+}
+.view[data-screen='play'],
+.view[data-screen='timed'] {
+  padding-bottom: 0;
 }
 
 /* ---------- Botones ---------- */
@@ -565,7 +573,7 @@ summary:focus-visible {
   justify-content: center;
 }
 .cards .card + .card {
-  margin-left: calc(var(--card-w) * -0.42);
+  margin-left: calc(var(--step, calc(var(--card-w) * 0.58)) - var(--card-w));
 }
 .hands {
   display: flex;
@@ -573,17 +581,47 @@ summary:focus-visible {
   gap: 14px;
   width: 100%;
 }
-.hands.two {
-  --card-w: 54px;
-  --card-h: 76px;
+.hands.n2 {
+  --card-w: 52px;
+  --card-h: 74px;
+  gap: 10px;
 }
-.hands.many {
-  --card-w: 42px;
-  --card-h: 60px;
+.hands.n3 {
+  --card-w: 40px;
+  --card-h: 57px;
   gap: 6px;
 }
-.hands.many .cards .card + .card {
-  margin-left: calc(var(--card-w) * -0.5);
+.hands.n4 {
+  --card-w: 34px;
+  --card-h: 48px;
+  gap: 4px;
+}
+.hands.n3 .hand,
+.hands.n4 .hand {
+  padding: 4px 3px;
+  min-width: 0;
+}
+.hands.n3 .hand-meta,
+.hands.n4 .hand-meta {
+  gap: 3px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.hands.n3 .total,
+.hands.n4 .total {
+  min-width: 0;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+.hands.n3 .bet-chip,
+.hands.n4 .bet-chip {
+  padding: 2px 5px;
+  font-size: 10px;
+}
+.hands.n4 .outcome {
+  font-size: 8.5px;
+  padding: 2px 5px;
+  letter-spacing: 0;
 }
 .hand {
   display: flex;
@@ -636,11 +674,12 @@ summary:focus-visible {
   background: linear-gradient(180deg, #f7d985, var(--gold-2));
   font-variant-numeric: tabular-nums;
 }
+.outcome-slot {
+  display: flex;
+  justify-content: center;
+  min-height: 19px;
+}
 .outcome {
-  position: absolute;
-  top: -10px;
-  left: 50%;
-  transform: translateX(-50%);
   font-size: 11px;
   font-weight: 800;
   padding: 3px 8px;
@@ -753,11 +792,11 @@ summary:focus-visible {
 @keyframes pop {
   from {
     opacity: 0;
-    transform: translateX(-50%) scale(0.6);
+    transform: scale(0.6);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) scale(1);
+    transform: scale(1);
   }
 }
 @keyframes rise {
@@ -902,8 +941,14 @@ details .ex {
 }
 
 /* Controles */
+/* La barra de acciones queda fija abajo: el botón principal siempre se ve. */
 .controls {
-  padding-bottom: 4px;
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  margin: 0 -12px -12px;
+  padding: 10px 12px calc(12px + var(--safe-bottom));
+  background: linear-gradient(180deg, rgba(7, 17, 14, 0) 0, var(--bg) 10px);
 }
 .actions {
   display: grid;
@@ -913,6 +958,9 @@ details .ex {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
+}
+.row3.n2 {
+  grid-template-columns: 1fr 1fr;
 }
 .row2 {
   display: grid;
@@ -1499,8 +1547,8 @@ details .ex {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(24px + var(--safe-bottom));
-  transform: translate(-50%, 20px);
+  top: calc(var(--safe-top) + 72px);
+  transform: translate(-50%, -12px);
   opacity: 0;
   pointer-events: none;
   z-index: 60;

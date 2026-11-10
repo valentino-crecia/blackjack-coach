@@ -22,6 +22,7 @@ Requieren Node 18 o superior. Sin dependencias.
 node tests/strategy.test.mjs   # todas las celdas de las 4 mesas + respaldos
 node tests/engine.test.mjs     # pagos, peek, seguro, dividir, DAS, H17/S17, recarga, mano sombra, storage
 node tests/simulate.mjs        # 1.000.000 de manos por mesa (unos 6 s). Acepta otro número: node tests/simulate.mjs 10000000
+node tests/qa-strategy-reference.mjs  # QA: estrategia contra la transcripción de Wizard of Odds
 ```
 
 ## Archivos
@@ -35,7 +36,7 @@ node tests/simulate.mjs        # 1.000.000 de manos por mesa (unos 6 s). Acepta 
 | `strategy.js` | Estrategia básica sin DOM: tablas por reglas, `bestAction(hand, dealerUp, rules, available)`, explicaciones. |
 | `config.js` | **Mesas, reglas, umbrales de desbloqueo, economía, rachas y tiempo de Contrarreloj.** |
 | `storage.js` | `localStorage` siempre en try/catch (clave `bjcoach.v1`); si falla, sigue en memoria y avisa. |
-| `sw.js` | Service worker: precache, cache-first, cache `bjcoach-v1`. |
+| `sw.js` | Service worker: precache (saltando el caché HTTP), cache-first, cache `bjcoach-v2`. |
 | `manifest.webmanifest`, `icons/` | Datos de instalación e íconos (180, 192, 512). |
 | `tests/` | Tests y simulación. |
 | `docs/capturas/` | Capturas de cada pantalla a 375×812. |
@@ -51,7 +52,12 @@ node tests/simulate.mjs        # 1.000.000 de manos por mesa (unos 6 s). Acepta 
 
 Si cambias reglas de una mesa, actualiza las tablas esperadas en `tests/strategy.test.mjs` y la referencia en `tests/simulate.mjs`.
 
-**Al publicar cambios**, sube la versión del cache en `sw.js` (`bjcoach-v1` → `bjcoach-v2`) para que los teléfonos que ya la tienen instalada bajen la nueva.
+**Al publicar cambios**, sube la versión del cache en `sw.js` (`bjcoach-v2` → `bjcoach-v3`) para que los teléfonos que ya la tienen instalada bajen la nueva.
+
+## Reglas de la app que conviene saber
+
+- La apuesta se cobra al repartir. Si sales a mitad de mano (botón ← o Estadísticas) pierdes lo apostado, incluido lo doblado, dividido o el seguro, y las decisiones ya tomadas cuentan para Práctica. Si cierras o recargas la página a mitad de mano, al volver esa mano se cierra como abandonada.
+- El bono de racha solo se paga en manos de Práctica con al menos una decisión (un blackjack natural no lo da).
 
 ## Simulación vs. referencia
 

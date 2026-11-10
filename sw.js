@@ -1,6 +1,6 @@
 // Service worker: precache de todos los archivos y cache-first.
 // Cambia la versión al publicar cambios para que los teléfonos bajen la nueva.
-const CACHE = 'bjcoach-v1';
+const CACHE = 'bjcoach-v2';
 const FILES = [
   './',
   './index.html',
@@ -20,7 +20,9 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(CACHE)
-      .then((cache) => cache.addAll(FILES))
+      // cache: 'reload' salta el caché HTTP (GitHub Pages usa max-age=600): así una versión
+      // nueva nunca guarda archivos viejos.
+      .then((cache) => cache.addAll(FILES.map((u) => new Request(u, { cache: 'reload' }))))
       .then(() => self.skipWaiting()),
   );
 });
